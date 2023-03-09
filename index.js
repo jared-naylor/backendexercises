@@ -39,11 +39,11 @@ const nameMatch = (name) => {
   return phonebook.find((contact) => contact.name === name);
 };
 
+app.use(express.static("build"));
+
 app.use(cors());
 
 app.use(express.json());
-
-app.use(express.static("build"));
 
 morgan.token("contact", function (req, res) {
   return JSON.stringify(req.body);
