@@ -1,42 +1,19 @@
+require("dotenv").config();
 const express = require("express");
 const morgan = require("morgan");
 const cors = require("cors");
+const Contact = require("./models/contact");
+const contact = require("./models/contact");
 const app = express();
 
-let phonebook = [
-  {
-    id: 1,
-    name: "Arto Hellas",
-    number: "040-123456",
-  },
-  {
-    id: 2,
-    name: "Ada Lovelace",
-    number: "39-44-5323523",
-  },
-  {
-    id: 3,
-    name: "Dan Abramov",
-    number: "12-43-234345",
-  },
-  {
-    id: 4,
-    name: "Mary Poppendieck",
-    number: "39-23-6423122",
-  },
-];
+const errorHandler = (error, request, response, next) => {
+  console.log(error.message);
 
-const retrieveContactById = (id) => {
-  return phonebook.find((contact) => contact.id === id);
-};
-
-const generateNewId = () => {
-  let max = Math.max(...phonebook.map((contact) => contact.id));
-  return max + 1;
-};
-
-const nameMatch = (name) => {
-  return phonebook.find((contact) => contact.name === name);
+  if (error.name === "CastError") {
+    return response.status(400).send({ error: "Malformatted ID" });
+  } else if (error.name === "ValidationError") {
+    return response.status(400).json({ error: error.message });
+  }
 };
 
 app.use(express.static("build"));
@@ -48,6 +25,33 @@ app.use(express.json());
 morgan.token("contact", function (req, res) {
   return JSON.stringify(req.body);
 });
+
+const createNewContact = (request, response, next) => {
+  let newContact = new Contact({ ...request.body });
+  newContact
+    .save()
+    .then((contact) => response.json(contact))
+    .catch((error) => next(error));
+};
+
+const updateExistingContact = (request, response, next) => {
+  const body = request.body;
+
+  const contact = {
+    name: body.name,
+    number: body.number,
+  };
+
+  Contact.findByIdAndUpdate(request.params.id, contact, {
+    new: true,
+    runValidators: true,
+    context: "query",
+  })
+    .then((updatedContact) => {
+      response.json(updatedContact);
+    })
+    .catch((error) => next(error));
+};
 
 app.use(
   morgan(function (tokens, req, res) {
@@ -64,48 +68,45 @@ app.use(
   })
 );
 
-app.get("/api/persons", (request, response) => {
-  response.json(phonebook);
+app.get("/api/persons", (request, response, next) => {
+  Contact.find({})
+    .then((contacts) => {
+      response.json(contacts);
+    })
+    .catch((error) => next(error));
 });
 
-app.get("/api/info", (request, response) => {
-  response.send(
-    `<p>Phonebook has info for ${
-      phonebook.length
-    } people</p><p>${new Date().toString()}`
-  );
+app.get("/api/persons/:id", (request, response, next) => {
+  const contact = Contact.findById(request.params.id)
+    .then((contact) => {
+      response.json(contact);
+    })
+    .catch((error) => next(error));
 });
 
-app.get("/api/persons/:id", (request, response) => {
-  const id = Number(request.params.id);
-  const contact = retrieveContactById(id);
-
-  if (contact) {
-    response.json(contact);
-  } else {
-    response.status(404).end();
-  }
+app.get("/api/info", (request, response, next) => {
+  Contact.find({})
+    .then((contacts) => {
+      response.send(
+        `<p>Phonebook has info for ${
+          contacts.length
+        } people</p><p>${new Date().toString()}</p>`
+      );
+    })
+    .catch((error) => next(error));
 });
 
-app.delete("/api/persons/:id", (request, response) => {
-  const id = Number(request.params.id);
-  phonebook = phonebook.filter((contact) => contact.id !== id);
-
-  response.status(204).end();
+app.delete("/api/persons/:id", (request, response, next) => {
+  Contact.findByIdAndRemove(request.params.id)
+    .then((result) => {
+      response.status(204).end();
+    })
+    .catch((error) => next(error));
 });
 
-app.post("/api/persons", (request, response) => {
-  let id = generateNewId();
-  if (!request.body.name || !request.body.number) {
-    response.status(404).json({ error: "Content missing" });
-  } else if (nameMatch(request.body.name)) {
-    response.status(404).json({ error: "name must be unique" });
-  }
+app.post("/api/persons", createNewContact);
 
-  let newContact = { id, ...request.body };
-  phonebook = phonebook.concat(newContact);
-  response.json(newContact);
-});
+app.put("/api/persons/:id", updateExistingContact);
 
 const unknownEndpoint = (request, response) => {
   response.status(404).send({ error: "unknown endpoint" });
@@ -113,7 +114,9 @@ const unknownEndpoint = (request, response) => {
 
 app.use(unknownEndpoint);
 
-const PORT = process.env.PORT || 3001;
+app.use(errorHandler);
+
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`Running on port ${PORT}...`);
 });
